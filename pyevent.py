@@ -72,8 +72,8 @@ class GameEvent:
     def __init__(self):
         self.handles = []
         
-    def Connect(self, obj):
-        self.handles.append(obj)
+    def Connect(self, func):
+        self.handles.append(func)
     
     def Trigger(self, *args):
         for handle in self.handles:
@@ -89,7 +89,49 @@ class RepeatedEvent:
         if time.time() - self.last_called >= self.interval:
             self.function()
             self.last_called = time.time()
+
+class NotifyEvent:
+    def __init__(self, bg_color, text_color):
+        self.bgc = bg_color
+        self.textc = text_color
+        self.Title = None
+        self.Subtitles = []
+        self.request = False
+        self.duration = 0
+        self.last_saved = 0
+
+    def Save(self, info, screen, title, subtitle, duration):
+        self.request = True
+        self.duration = duration
+        self.last_saved = time.time()
+        
+        width, height = info.current_w, info.current_h - int(20 / 100 * info.current_h)
+        self.box_w, self.box_h = width // 1.5, height // 1.5
+        self.box_x, self.box_y = (width - self.box_w) // 2, (height - self.box_h) // 2
+
+        margin = int(3 / 100 * self.box_w)
+        title_size = int(self.box_w // 14)
+        subtitle_size = int(self.box_w // 18)
+
+        if not self.Title or self.Title.text != title:
+            self.Title = Text(title_size, (self.box_x + margin, self.box_y + margin), self.textc, title)
+
+        self.Subtitles = []
+        subtitle_lines = subtitle.split('\n')
+        for i, line in enumerate(subtitle_lines):
+            y_offset = self.box_y + margin + title_size + (i * (subtitle_size + margin))
+            self.Subtitles.append(Text(subtitle_size, (self.box_x + margin, y_offset), self.textc, line))
             
+    def Notify(self, screen):    
+        if time.time() - self.last_saved > self.duration:
+            self.request = False
+         
+        pygame.draw.rect(screen, self.bgc, (self.box_x, self.box_y, self.box_w, self.box_h))
+                  
+        self.Title.Draw(screen)
+        for subtitle_obj in self.Subtitles:
+            subtitle_obj.Draw(screen)
+                     
 class Text:
     def __init__(self, size, pos, color, text):
         self.size = size
@@ -150,48 +192,63 @@ class Location:
     def Connect(self, obj):
         self.objects.append(obj)
 
-class NotifyEvent:
-    def __init__(self, bg_color, text_color):
-        self.bgc = bg_color
-        self.textc = text_color
-        self.Title = None
-        self.Subtitles = []
-        self.request = False
-        self.duration = 0
-        self.last_saved = 0
-
-    def Save(self, info, screen, title, subtitle, duration):
-        self.request = True
-        self.duration = duration
-        self.last_saved = time.time()
+class Bar:
+    def __init__(self, progress, max, pos, color, size, outline=2, outlinec=(0, 0, 0)):
+        self.progress = progress
+        self.max = max
+        self.pos = pos
+        self.color = color
+        self.size = size
+        self.outline = outline
+        self.outlinec = outlinec
         
-        width, height = info.current_w, info.current_h - int(20 / 100 * info.current_h)
-        self.box_w, self.box_h = width // 1.5, height // 1.5
-        self.box_x, self.box_y = (width - self.box_w) // 2, (height - self.box_h) // 2
+    def Draw(self, screen):
+        bar_width = int((self.progress / self.max) * self.size[0])
+        outline_color = self.outlinec
+        outline_thickness = self.outline 
 
-        margin = int(3 / 100 * self.box_w)
-        title_size = int(self.box_w // 14)
-        subtitle_size = int(self.box_w // 18)
+        pygame.draw.rect(screen, (200, 200, 200), (*self.pos, *self.size))        
+        pygame.draw.rect(screen, self.color, (*self.pos, bar_width, self.size[1]))
+        pygame.draw.rect(screen, outline_color, (*self.pos, *self.size), outline_thickness)
+        
+class Leaderstats:
+    def __init__(self):
+        self.variable = {}
+        
+    def Add(self, name, value):
+        self.variable.update({name:value})    
+    
+    def Edit(self, name, value):
+        self.variable[name] = value
+    
+    def Delete(self, name):
+        self.variable.pop(name)
 
-        if not self.Title or self.Title.text != title:
-            self.Title = Text(title_size, (self.box_x + margin, self.box_y + margin), self.textc, title)
-
-        self.Subtitles = []
-        subtitle_lines = subtitle.split('\n')
-        for i, line in enumerate(subtitle_lines):
-            y_offset = self.box_y + margin + title_size + (i * (subtitle_size + margin))
-            self.Subtitles.append(Text(subtitle_size, (self.box_x + margin, y_offset), self.textc, line))
+class Health:
+    def __init__(self):
+        self.health = 100
+    
+    def Heal(self, value):
+        self.health += value
+    
+    def Set(self, value):
+        self.health = value
+    
+    def Damage(self, value):
+        self.health -= value
+    
+    def OnDeath(self):
+        if self.health <= 0:
+            self.health = 100
+            return True
             
-    def Notify(self, screen):    
-        if time.time() - self.last_saved > self.duration:
-            self.request = False
-         
-        pygame.draw.rect(screen, self.bgc, (self.box_x, self.box_y, self.box_w, self.box_h))
-                  
-        self.Title.Draw(screen)
-        for subtitle_obj in self.Subtitles:
-            subtitle_obj.Draw(screen)
-           
+        return False
+        
+class Character:
+    def __init__(self):
+        self.Leaderstats = Leaderstats()
+        self.Health = Health()
+    
 class Game:
     def __init__(self, conf):
         self.running = True
@@ -222,6 +279,7 @@ class Game:
         self.Notification = NotifyEvent(conf.get('notify_background', (255, 255, 255)), conf.get('notify_text', (0, 0, 0)))
         self.PlayerAdded = GameEvent()
         self.PlayerRemoved = GameEvent()
+        self.PlayerDeath = GameEvent()
         
         info = pygame.display.Info()
         size = int(20 / 100 * info.current_h)
@@ -229,11 +287,23 @@ class Game:
         self.left = Text(size, (0, info.current_h - size), (0, 0, 0), '<')
         self.right = Text(size, (info.current_w - size / 2, info.current_h - size), (0, 0, 0), '>')
         self.stop = Text(size, (size, info.current_h - size * 1.1), (0, 0, 0), 'x')
+
+        screen_width = info.current_w
+        screen_height = info.current_h
+        margin = int(0.02 * screen_width)
+        bar_width = int(0.2 * screen_width)
+        bar_height = int(0.1 * screen_height)
+        bar_x = screen_width - bar_width - margin
+        bar_y = margin
+
+        self.health_bar = Bar(progress=100, max=100, pos=(bar_x, bar_y), color=(255, 0, 0), size=(bar_width, bar_height), outline=margin//4)
         
         self.clock = pygame.time.Clock()
         self.fps = conf.get('fps', 60)
         
         self.functions = []
+        
+        self.Player = Character()
         
     def Add_Object(self, obj):
         self.objects.append(obj)
@@ -270,6 +340,8 @@ class Game:
             for function in self.functions:
                 function.update()
                 
+            self.health_bar.progress = self.Player.Health.health
+            
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
@@ -293,7 +365,10 @@ class Game:
                                         
                 elif event.type == pygame.MOUSEBUTTONUP:
                     pygame.mouse.set_pos(0, 0)
-                    
+            
+            if self.Player.Health.OnDeath():
+                self.PlayerDeath.Trigger()
+                
             self.screen.fill(self.location.color)
             
             list_obj = []
@@ -313,6 +388,7 @@ class Game:
             self.left.Draw(self.screen)
             self.right.Draw(self.screen)
             self.stop.Draw(self.screen)
+            self.health_bar.Draw(self.screen)
             
             if self.Notification.request:
                 self.Notification.Notify(self.screen)
@@ -332,4 +408,4 @@ class Game:
         
         self.PlayerRemoved.Trigger()
         
-        pygame.quit()
+        pygame.quit() 
