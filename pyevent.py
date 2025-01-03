@@ -163,7 +163,7 @@ class Object:
         self.sprite = pygame.image.load(sprite)
         self.sprite = pygame.transform.scale(self.sprite, size)
         
-        self.visible = True
+        self.transparency = 0
         
         self.Interacted = TriggerEvent()
         
@@ -181,7 +181,10 @@ class Object:
         return False
         
     def Draw(self, screen):
-        screen.blit(self.sprite, self.pos)
+        alpha_value = int((1 - self.transparency) * 255)
+        sprite_copy = self.sprite.copy()
+        sprite_copy.set_alpha(alpha_value)
+        screen.blit(sprite_copy, self.pos)    
 
 class Location:
     def __init__(self, name, color):
@@ -287,7 +290,8 @@ class Game:
         self.left = Text(size, (0, info.current_h - size), (0, 0, 0), '<')
         self.right = Text(size, (info.current_w - size / 2, info.current_h - size), (0, 0, 0), '>')
         self.stop = Text(size, (size, info.current_h - size * 1.1), (0, 0, 0), 'x')
-
+        self.indicator = Text(int(size // 2), (size * 2, info.current_h - size // 1.5), (0, 0, 0), 'Not Found')
+        
         screen_width = info.current_w
         screen_height = info.current_h
         margin = int(0.02 * screen_width)
@@ -341,6 +345,7 @@ class Game:
                 function.update()
                 
             self.health_bar.progress = self.Player.Health.health
+            self.indicator.text = self.location.name
             
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -377,8 +382,7 @@ class Game:
                         
             for obj in self.objects:
                 if obj.id in list_obj:
-                    if obj.visible:
-                        obj.Draw(self.screen)
+                    obj.Draw(self.screen)
             
             info = pygame.display.Info()
             
@@ -388,6 +392,7 @@ class Game:
             self.left.Draw(self.screen)
             self.right.Draw(self.screen)
             self.stop.Draw(self.screen)
+            self.indicator.Draw(self.screen)
             self.health_bar.Draw(self.screen)
             
             if self.Notification.request:
