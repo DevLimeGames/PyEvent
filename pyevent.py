@@ -1,5 +1,6 @@
 import pygame
 import time
+import math
 
 pygame.init()
 pygame.font.init()
@@ -90,6 +91,18 @@ class RepeatedEvent:
             self.function()
             self.last_called = time.time()
 
+class KeyEvent:
+    def __init__(self):
+        self.handles = {}
+    
+    def Connect(self, key, func):
+        self.handles.update({key:func})
+    
+    def Trigger(self, event):
+        for key in self.handles.items():
+            if key == event.key:
+                self.handles[key]()
+        
 class NotifyEvent:
     def __init__(self, bg_color, text_color):
         self.bgc = bg_color
@@ -155,15 +168,21 @@ class Text:
     def Click(self, mouse_pos):
         return self.rect.collidepoint(mouse_pos)   
 
+import math
+
 class Object:
     def __init__(self, id, size, pos, sprite):
         self.id = id
         self.size = size
-        self.pos = pos
+        self.x, self.y = pos
         self.sprite = pygame.image.load(sprite)
         self.sprite = pygame.transform.scale(self.sprite, size)
         
         self.transparency = 0
+        self.locked = True
+        
+        self.xvel = 0
+        self.yvel = 0        
         
         self.Interacted = TriggerEvent()
         
@@ -173,19 +192,81 @@ class Object:
         
     def Clicked(self, mouse):
         x, y = mouse
-        obj_x, obj_y = self.pos
+        obj_x, obj_y = self.x, self.y
         obj_width, obj_height = self.size
         if obj_x <= x <= obj_x + obj_width and obj_y <= y <= obj_y + obj_height:
             self.Interact()
             return True
         return False
+    
+    def Update(self, info, gravity, args):
+        if not self.locked:
+            width = info.current_w
+            height = info.current_h
+            H = height - int(20 / 100 * height)
+            
+            self.x += self.xvel
+            
+            if self.x > 0:
+                self.x -= 1
+            elif self.x < 0:
+                self.x += 1
+            
+            if self.y < 0:
+                self.y += 2
+                
+            self.y += self.yvel
+            
+            for obj in args:
+                if self != obj:
+                    if (self.x < obj.x + obj.size[0] and self.x + self.size[0] > obj.x and
+                        self.y < obj.y + obj.size[1] and self.y + self.size[1] > obj.y):
+                        self.reflect(obj)
+
+            self.check_wall_collision(info, H)
+
+    def reflect(self, other):
+        normal_x = self.x - other.x
+        normal_y = self.y - other.y
+        normal_length = math.sqrt(normal_x**2 + normal_y**2)
         
+        if normal_length == 0:
+            return
+        
+        normal_x /= normal_length
+        normal_y /= normal_length
+        
+        v1x, v1y = self.xvel, self.yvel
+        v2x, v2y = other.xvel, other.yvel
+        
+        v_rel = (v1x - v2x) * normal_x + (v1y - v2y) * normal_y
+        
+        if v_rel < 0:
+            impulse = 2 * v_rel / 2
+            self.xvel -= impulse * normal_x
+            self.yvel -= impulse * normal_y
+            other.xvel += impulse * normal_x
+            other.yvel += impulse * normal_y
+
+    def check_wall_collision(self, info, H):
+        screen_width, screen_height = info.current_w, H
+        
+        if self.x <= 0:
+            self.xvel = abs(self.xvel)
+        elif self.x + self.size[0] >= screen_width:
+            self.xvel = -abs(self.xvel)
+        
+        if self.y <= 0:
+            self.yvel = abs(self.yvel)
+        elif self.y + self.size[1] >= screen_height:
+            self.yvel = 0
+
     def Draw(self, screen):
         alpha_value = int((1 - self.transparency) * 255)
         sprite_copy = self.sprite.copy()
         sprite_copy.set_alpha(alpha_value)
-        screen.blit(sprite_copy, self.pos)    
-
+        screen.blit(sprite_copy, (self.x, self.y))
+        
 class Location:
     def __init__(self, name, color):
         self.name = name
@@ -280,9 +361,11 @@ class Game:
         self.location = Default
         
         self.Notification = NotifyEvent(conf.get('notify_background', (255, 255, 255)), conf.get('notify_text', (0, 0, 0)))
+        self.KeyPressed = KeyEvent()
         self.PlayerAdded = GameEvent()
         self.PlayerRemoved = GameEvent()
         self.PlayerDeath = GameEvent()
+        self.PlayerMoved = GameEvent()
         
         info = pygame.display.Info()
         size = int(20 / 100 * info.current_h)
@@ -309,6 +392,8 @@ class Game:
         
         self.Player = Character()
         
+        self.gravity = conf.get('gravity', 0)
+        
     def Add_Object(self, obj):
         self.objects.append(obj)
          
@@ -325,6 +410,7 @@ class Game:
             if move_to <= len(self.locations):
                 self.locindex = move_to
                 self.location = self.locations[move_to-1]
+                self.PlayerMoved.Trigger()
       
     def Notify(self, title, subtitle='', duration=3):
         info = pygame.display.Info()
@@ -370,22 +456,32 @@ class Game:
                                         
                 elif event.type == pygame.MOUSEBUTTONUP:
                     pygame.mouse.set_pos(0, 0)
-            
+                
+                if event.type == pygame.KEYDOWN:
+                    self.KeyPressed.Trigger(event)
+                    
             if self.Player.Health.OnDeath():
                 self.PlayerDeath.Trigger()
                 
             self.screen.fill(self.location.color)
             
+            list_obj_id = []
             list_obj = []
-            for obj in self.location.objects:
-                list_obj.append(obj.id)
-                        
-            for obj in self.objects:
-                if obj.id in list_obj:
-                    obj.Draw(self.screen)
             
+            for obj in self.location.objects:
+                list_obj_id.append(obj.id)
+            
+            for obj in self.objects:
+                if obj.id in list_obj_id:
+                    list_obj.append(obj)
+                    
             info = pygame.display.Info()
             
+            for obj in self.objects:
+                if obj.id in list_obj_id:
+                    obj.Update(info, self.gravity, list_obj)
+                    obj.Draw(self.screen)
+                        
             ui_height = (20 / 100) * info.current_h
             self.screen.fill((196, 196, 196), (0, info.current_h - ui_height, info.current_w, ui_height))    
                         
